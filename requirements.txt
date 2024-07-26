@@ -16,7 +16,6 @@ bs4==0.0.2
 build==1.2.1
 cachetools==5.4.0
 certifi==2024.7.4
-chainlit==1.1.306
 charset-normalizer==3.3.2
 chevron==0.14.0
 chroma-hnswlib==0.7.6
