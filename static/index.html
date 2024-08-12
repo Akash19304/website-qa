@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Website QA</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+</head>
+
+<body class="blue-grey lighten-5">
+    <div class="container">
+        <h1 class="center-align">DOCS QA</h1>
+        <div class="row">
+            <div class="input-field col s9">
+                <input type="text" id="message-input" class="validate" placeholder="Type your message here">
+            </div>
+            <div class="col s3">
+                <button class="btn waves-effect waves-light" onclick="sendMessage()" style="margin-top:16px">
+                    <i class="material-icons">send</i>
+                </button>
+            </div>
+        </div>
+        <div id="data-container" class="section">
+        </div>
+    </div>
+
+    <script>
+        async function sendMessage() {
+            const message = document.getElementById("message-input").value;
+
+            const response = await fetch("http://localhost:8000/ask", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({ question: message })
+            });
+
+            if (!response.ok) {
+                console.error("Failed to fetch data:", response.statusText);
+                return;
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            const dataContainer = document.getElementById("data-container");
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                let chunk = decoder.decode(value, { stream: true });
+
+                chunk = chunk.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank">$1</a>');
+
+                dataContainer.innerHTML += chunk + "<br>";
+            }
+        }
+    </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
+</body>
+
+</html>

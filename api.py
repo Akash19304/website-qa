@@ -12,13 +12,25 @@ from langchain.chains import create_retrieval_chain
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain import hub
+from fastapi.responses import StreamingResponse, FileResponse
 import os
 from dotenv import load_dotenv
 import pickle
+from langchain_openai import ChatOpenAI
+from fastapi.middleware.cors import CORSMiddleware
+
 
 load_dotenv()
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allows all origins
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows all methods (GET, POST, etc.)
+    allow_headers=["*"],  # Allows all headers
+)
 
 class Question(BaseModel):
     question: str
@@ -28,7 +40,6 @@ def scrape_website(base_url):
     response = requests.get(base_url)
     soup = BeautifulSoup(response.text, 'html.parser')
     
-    # Extract links from sidebar or other navigation elements
     links = soup.select('a')
     for link in links:
         url = link.get('href')
@@ -82,29 +93,76 @@ def initialize_vectorstore():
     
     return vectorstore
 
-
-
 def initialize_retrieval_chain(vectorstore):
-    retriever = vectorstore.as_retriever(k=1)
+    retriever = vectorstore.as_retriever(k=4)
 
     llm = ChatGroq(
         model="llama3-8b-8192",
-        temperature=0
+        temperature=0.2,
+        streaming=True 
     )
-    
 
-    retrieval_qa_chat_prompt = hub.pull("langchain-ai/retrieval-qa-chat") 
+
+    # llm = ChatOpenAI(temperature=0.3, streaming=True)
+
+
+    
+    retrieval_qa_chat_prompt = hub.pull("langchain-ai/retrieval-qa-chat") + "Give a detailed answer to the question."
+
     document_chain = create_stuff_documents_chain(llm, retrieval_qa_chat_prompt)
     retrieval_chain = create_retrieval_chain(retriever, document_chain)
+    print("Retrieval chain created")
 
     return retrieval_chain
-
-
 
 def format_answer(answer, context):
     sources = {doc.metadata['url'] for doc in context}
     formatted_answer = f"{answer}\n\nSources:\n" + "\n".join(sources)
     return formatted_answer
+
+
+# async def generate_chat_responses(retrieval_chain, question):
+#     try:
+#         async for chunk in retrieval_chain.astream({"input": question.question}):
+#             print("chunk --", chunk)  # This will help you understand the structure of the chunk
+#             # Assume chunk is a dictionary and extract the relevant part
+#             if isinstance(chunk, dict) and "text" in chunk:
+#                 content = chunk["text"].replace("\n", "<br>")
+#                 yield f"data: {content}\n\n"
+#             else:
+#                 yield f"data: Unexpected data format: {chunk}\n\n"
+#     except Exception as e:
+#         yield f"data: Error: {str(e)}\n\n"
+
+
+async def generate_chat_responses(retrieval_chain, question):
+    try:
+        full_answer = ""
+        context_data = []
+
+        async for chunk in retrieval_chain.astream({"input": question.question}):
+            if "answer" in chunk:
+                full_answer += chunk["answer"]
+
+            if "context" in chunk:
+                context_data.append(chunk['context'])
+
+        if full_answer:
+            full_answer = full_answer.replace("\n", "<br>")
+            sources = set()
+            if context_data:
+                for doc in context_data[0]:
+                    sources.add(doc.metadata['url'])
+            formatted_answer = f"{full_answer}\n\n\nSources:\n" + "\n".join(sources)
+            yield f"Answer: {formatted_answer}\n\n"
+
+    except Exception as e:
+        yield f"Error: {str(e)}\n\n"
+
+
+@app.get("/")
+async def root():
+    return FileResponse("static/index.html")
 
 
 
@@ -113,23 +171,9 @@ async def ask_question(question: Question):
     try:
         vectorstore = initialize_vectorstore()
         retrieval_chain = initialize_retrieval_chain(vectorstore)
-
-        retriever = vectorstore.as_retriever(k=1)
-        docs = retriever.invoke(question.question)
-        response = retrieval_chain.invoke({"input": question.question})
-
-        answer = response['answer']
-        context = response['context']
-        formatted_response = format_answer(answer, context)
-        
-        return {"response": formatted_response}
-    
-
+        return StreamingResponse(generate_chat_responses(retrieval_chain, question), media_type="text/event-stream")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
-
 
 if __name__ == "__main__":
     import uvicorn
