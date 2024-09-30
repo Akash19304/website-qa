@@ -1,4 +1,4 @@
-website rag with langchain implemented separately with a `Streamlit` App & `FastApi`.
+website rag streaming chatbot with langchain implemented separately with a `Streamlit` App & `FastApi`.
 
 create virtual environment 
 ``
